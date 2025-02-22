@@ -1,0 +1,27 @@
+[package]
+name = "quickfix-test"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+quickfix-msg44 = { git = "https://github.com/fantasy-peak/quickfix-rs.git" }
+# coinbase-fix50-market-data = { git = "https://github.com/fantasy-peak/quickfix-rs.git" }
+# coinbase-fix-utils = { git = "https://github.com/fantasy-peak/quickfix-rs.git" }
+quickfix = { git = "https://github.com/fantasy-peak/quickfix-rs.git" }
+tokio = { version = "1.43.0", features = ["full"] }
+tonic = "0.12.3"
+prost = "0.13.5"
+futures-util = "0.3.31"
+tokio-stream = "0.1.17"
+tonic-reflection = "0.12.3"
+
+[build-dependencies]
+tonic-build = "0.12.3"
+
+[[bin]]
+name = "server"
+path = "src/main.rs"
+
+# [[bin]]
+# name = "client"
+# path = "src/client.rs"
