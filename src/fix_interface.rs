@@ -5,9 +5,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use quickfix::*;
+use quickfix_msg44::NewOrderSingle;
+use quickfix_msg44::field_types::OrdType;
+use quickfix_msg44::field_types::Side;
 use tokio::sync::mpsc;
+use tokio::sync::Mutex;
 
 use crate::fantasy::RequestMessage;
+use crate::shared_data;
+use crate::shared_data::SharedData;
 
 #[derive(Debug, PartialEq)]
 pub enum QuickFixState {
@@ -23,13 +29,13 @@ pub struct Order {
 
 pub struct FixApplication {
     sender: mpsc::UnboundedSender<QuickFixState>,
-    notice_sender: mpsc::UnboundedSender<String>,
+    notice_sender: Arc<Mutex<SharedData>>,
 }
 
 impl FixApplication {
     pub fn new(
         sender: mpsc::UnboundedSender<QuickFixState>,
-        notice_sender: mpsc::UnboundedSender<String>,
+        notice_sender: Arc<Mutex<SharedData>>,
     ) -> FixApplication {
         FixApplication {
             sender,
@@ -138,6 +144,7 @@ impl LogCallback for FantasyLogger {
 pub fn start_quickfix_server(
     config_file: String,
     order_recv: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<RequestMessage>>>,
+    shared_data: Arc<tokio::sync::Mutex<SharedData>>,
 ) -> Result<(), QuickFixError> {
     /*
         let mut my_string = String::from("");
@@ -152,9 +159,8 @@ pub fn start_quickfix_server(
 
     let (mut quick_fix_state_sender, mut quick_fix_state_receiver) =
         mpsc::unbounded_channel::<QuickFixState>();
-    let (mut a, mut b) = mpsc::unbounded_channel::<String>();
 
-    let fix_application = FixApplication::new(quick_fix_state_sender, a);
+    let fix_application = FixApplication::new(quick_fix_state_sender, shared_data);
     let app = Application::try_new(&fix_application)?;
 
     let mut acceptor = SocketInitiator::try_new(&settings, &app, &store_factory, &log_factory)?;
@@ -187,8 +193,44 @@ pub fn start_quickfix_server(
                         }
                     }
                 },
-                Some(msg) = order_recv_chn.recv() => {
+                Some(request) = order_recv_chn.recv() => {
                     println!("从第二个通道接收到消息");
+                    let now = chrono::Utc::now();
+                    now.format("%Y%m%d-%T%.3f").to_string();
+                    if let Ok(mut order) = NewOrderSingle::try_new(
+                        request.message,
+                        Side::Buy,
+                        now.to_string(),
+                        OrdType::Limit,
+                    ) {
+                        if let Err(e) = order.set_order_qty(14.0) {
+                            eprintln!("Failed to set order quantity: {}", e);
+                            continue;
+                        }
+                    
+                        if let Err(e) = order.set_symbol("APPL US Equity".to_string()) {
+                            eprintln!("Failed to set symbol: {}", e);
+                            continue;
+                        }
+                    
+                        if let Err(e) = order.set_price(893.123) {
+                            eprintln!("Failed to set price: {}", e);
+                            continue;
+                        }
+                    
+                        if let Ok(session_id) = SessionId::try_new("FIX.4.2", "fantasy", "SIMULATOR", "") {
+                            if let Err(e) = send_to_target(order.into(), &session_id) {
+                                eprintln!("Failed to send order: {}", e);
+                                continue;
+                            }
+                        } else {
+                            eprintln!("Failed to create session ID");
+                            continue;
+                        }
+                    } else {
+                        eprintln!("Failed to create new order");
+                        continue;
+                    }
                 },
                 else => {
                 }

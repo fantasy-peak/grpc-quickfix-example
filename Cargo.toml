@@ -15,6 +15,12 @@ futures-util = "0.3.31"
 tokio-stream = "0.1.17"
 tonic-reflection = "0.12.3"
 
+chrono = "0.4.39"
+config = "0.15.8"
+serde = { version = "1.0.218", features = ["derive"] }
+serde_yaml = "0.9.33"
+
+
 [build-dependencies]
 tonic-build = "0.12.3"
 

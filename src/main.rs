@@ -1,12 +1,21 @@
+use config::Config;
 use quickfix::*;
 use tokio::sync::{Mutex, mpsc};
-
+use tonic_reflection::pb::v1::FILE_DESCRIPTOR_SET;
 pub mod fix_interface;
 pub use fix_interface::*;
+use tonic_reflection::server::Builder;
+pub mod cfg;
+pub use cfg::GwConfig;
+pub use cfg::*;
+use config::File;
+use serde::Deserialize;
+pub mod shared_data;
 
 use std::{
     env,
     io::{Read, stdin},
+    net::SocketAddr,
     process::exit,
     sync::Arc,
     thread,
@@ -16,6 +25,11 @@ use std::{
 // 自动生成的模块
 pub mod fantasy {
     tonic::include_proto!("fantasy"); // 这里的包名是 proto 文件中的 package 名
+}
+
+pub mod proto {
+    pub(crate) const FILE_DESCRIPTOR_SET: &[u8] =
+        tonic::include_file_descriptor_set!("example_descriptor");
 }
 
 use fantasy::example_service_server::{ExampleService, ExampleServiceServer};
@@ -106,19 +120,33 @@ impl ExampleService for MyExampleService {
     ) -> Result<Response<Self::BidiStreamStream>, Status> {
         println!("双向流式调用");
         let mut stream = request.into_inner();
-        let (tx, rx) = mpsc::channel(4);
+        let (tx, mut rx) = mpsc::channel(4);
 
         tokio::spawn(async move {
-            while let Some(req) = stream.message().await.unwrap() {
-                tx.send(Ok(ResponseMessage {
-                    message: format!("Echo: {}", req.message),
-                }))
-                .await
-                .unwrap();
+            while let Some(req) = match stream.message().await {
+                Ok(Some(req)) => Some(req),
+                Ok(None) => {
+                    println!("客户端流已关闭");
+                    return;
+                }
+                Err(e) => {
+                    eprintln!("接收消息时出错: {}", e);
+                    return;
+                }
+            } {
+                if tx
+                    .send(Ok(ResponseMessage {
+                        message: format!("Echo: {}", req.message),
+                    }))
+                    .await
+                    .is_err()
+                {
+                    eprintln!("发送消息失败，接收端可能已关闭");
+                    break;
+                }
             }
             println!("流结束");
         });
-
         Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
     }
 }
@@ -128,9 +156,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = env::args().collect();
     let Some(cfg) = args.get(1) else {
         println!("Bad program usage: {} <config_file>", args[0]);
-        exit(1);
+        return Err("Bad program usage: <config_file> argument missing".into());
     };
-    let config_file = cfg.clone();
+
+    // 创建配置对象并加载 YAML 文件
+    let settings = Config::builder()
+        .add_source(File::with_name(&cfg)) // 加载 YAML 文件
+        .build();
+
+    if let Err(e) = settings {
+        eprintln!("Error loading config: {}", e);
+        return Err("Error loading config".into());
+    }
+    let mut gw_config = None;
+    let settings = settings.unwrap();
+    match settings.try_deserialize::<GwConfig>() {
+        Ok(config) => gw_config = Some(config),
+        Err(e) => eprintln!("Error deserializing config: {}", e), // 显示具体错误
+    }
 
     // recv order from grpc forward to quickfix
     let (order_sender, order_receiver) = mpsc::unbounded_channel::<RequestMessage>();
@@ -139,19 +182,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let order_receiver_clone = std::sync::Arc::new(Mutex::new(order_receiver));
     let notice_sender_clone = std::sync::Arc::new(Mutex::new(notice_sender));
-
+    let config_file = gw_config.unwrap().fix_cfg.clone();
+    let shared_data = Arc::new(tokio::sync::Mutex::new(shared_data::SharedData::new()));
+    let data_clone = Arc::clone(&shared_data);
     thread::spawn(move || {
-        let _ = start_quickfix_server(config_file.clone(), order_receiver_clone.clone());
+        if let Err(e) = start_quickfix_server(
+            config_file.clone(),
+            order_receiver_clone.clone(),
+            data_clone.clone(),
+        ) {
+            println!("start_quickfix_server error: {}", e);
+        }
     });
 
-    let addr = "[::1]:50051".parse()?;
+    let address = "127.0.0.1:50051".to_string(); // 你可以根据需要使用 `String` 或 `&str`
+    let addr: SocketAddr = address.parse()?;
     let example_service = MyExampleService::new(order_sender);
+
+    // 启用 gRPC 反射 https://medium.com/@drewjaja/how-to-add-grpc-reflection-with-rust-tonic-reflection-1f4e14e6750e
+    let reflection_service = tonic_reflection::server::Builder::configure()
+        .register_encoded_file_descriptor_set(proto::FILE_DESCRIPTOR_SET)
+        .build_v1()?;
 
     println!("Server listening on {}", addr);
 
     // 启动 gRPC 服务器
     Server::builder()
         .add_service(ExampleServiceServer::new(example_service))
+        .add_service(reflection_service)
         .serve(addr)
         .await?;
 
