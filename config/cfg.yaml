@@ -1,0 +1,7 @@
+---
+address: "127.0.0.1:50051"
+fix_cfg: "./config/fix.ini"
+begin_string: "FIX.4.2"
+sender_comp_id: "fantasy"
+target_comp_id: "SIMULATOR"
+interval: 1000

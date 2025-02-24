@@ -1,0 +1,11 @@
+[package]
+name = "fantasy-fix42"
+version = "0.1.6"
+edition = "2021"
+publish = false
+
+[dependencies]
+quickfix = { git = "https://github.com/fantasy-peak/quickfix-rs.git" }
+
+[build-dependencies]
+quickfix-msg-gen = { git = "https://github.com/fantasy-peak/quickfix-rs.git" }
