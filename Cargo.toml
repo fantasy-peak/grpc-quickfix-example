@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-quickfix-msg44 = { git = "https://github.com/fantasy-peak/quickfix-rs.git" }
+quickfix-msg42 = { git = "https://github.com/fantasy-peak/quickfix-rs.git" }
 # coinbase-fix50-market-data = { git = "https://github.com/fantasy-peak/quickfix-rs.git" }
 # coinbase-fix-utils = { git = "https://github.com/fantasy-peak/quickfix-rs.git" }
 quickfix = { git = "https://github.com/fantasy-peak/quickfix-rs.git" }

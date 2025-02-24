@@ -1,15 +1,13 @@
-use std::sync::{Arc, Mutex};
-
 #[derive(Debug)]
 pub struct SharedData {
-    pub counter: u64,          // 递增的序列号
-    pub messages: Vec<String>, // 存储的消息
+    pub counter: u64,
+    pub messages: Vec<String>,
 }
 
 impl SharedData {
     pub fn new() -> Self {
         SharedData {
-            counter: 1, // 序号从 1 开始
+            counter: 1,
             messages: Vec::new(),
         }
     }
@@ -21,11 +19,14 @@ impl SharedData {
         seq_num
     }
 
-    pub fn get_messages_from(&self, start_seq: u64) -> Vec<String> {
+    pub fn get_messages_from(&self, start_seq: u64) -> Vec<SharedData> {
         let mut result = Vec::new();
         for (i, msg) in self.messages.iter().enumerate() {
             if (i as u64 + 1) >= start_seq {
-                result.push(msg.clone());
+                let mut sd = SharedData::new();
+                sd.counter = i as u64 + 1;
+                sd.messages.push(msg.clone());
+                result.push(sd);
             }
         }
         result

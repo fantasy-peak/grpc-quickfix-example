@@ -1,4 +1,6 @@
 import quickfix as fix
+import random
+import string
 
 class FixServer(fix.Application):
     def onCreate(self, sessionID):
@@ -42,13 +44,13 @@ class FixServer(fix.Application):
             side = fix.Side()
             message.getField(side)
 
-            print(f"[SERVER] Order ID: {order_id.getValue()}, Symbol: {symbol.getValue()}, Side: {side.getValue()}")
+            print(f"333333333333333[SERVER] Order ID: {order_id.getValue()}, Symbol: {symbol.getValue()}, Side: {side.getValue()}")
 
             # **构造 Execution Report (8)**
             execution_report = fix.Message()
             execution_report.getHeader().setField(fix.MsgType(fix.MsgType_ExecutionReport))
             
-            execution_report.setField(fix.OrderID("12345"))  # 订单编号
+            execution_report.setField(fix.OrderID(''.join(random.choices(string.ascii_uppercase + string.digits, k=10))))  # 订单编号
             execution_report.setField(order_id)  # 客户订单编号
             execution_report.setField(symbol)  # 交易的 Symbol
             execution_report.setField(fix.ExecID("54321"))  # 执行编号
@@ -58,7 +60,7 @@ class FixServer(fix.Application):
             execution_report.setField(fix.LeavesQty(0))  # 剩余未成交数量
             execution_report.setField(fix.CumQty(100))  # 累积成交数量
             execution_report.setField(fix.AvgPx(150.25))  # 平均成交价
-
+            execution_report.setField(fix.Text("hello world"))  # 平均成交价
             # 发送执行报告
             fix.Session.sendToTarget(execution_report, sessionID)
             print("[SERVER] Execution Report Sent")
