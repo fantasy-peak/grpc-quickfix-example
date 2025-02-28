@@ -3,6 +3,8 @@ use std::fmt;
 use std::io;
 use std::io::Write;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 
@@ -33,6 +35,7 @@ pub struct FixApplication {
     shared_data: Arc<Mutex<SharedData>>,
     handle: Handle,
     gw_config: GwConfig,
+    connected: Arc<AtomicBool>,
 }
 
 impl FixApplication {
@@ -40,11 +43,13 @@ impl FixApplication {
         shared_data: Arc<Mutex<SharedData>>,
         handle: Handle,
         gw_config: GwConfig,
+        connected: Arc<AtomicBool>,
     ) -> FixApplication {
         FixApplication {
             shared_data,
             handle,
             gw_config,
+            connected,
         }
     }
 
@@ -64,11 +69,13 @@ impl ApplicationCallback for FixApplication {
     /// On session logon.
     fn on_logon(&self, _session: &SessionId) {
         info!("on_logon");
+        self.connected.store(true, Ordering::Relaxed);
     }
 
     /// On session logout.
     fn on_logout(&self, _session: &SessionId) {
         info!("on_logout");
+        self.connected.store(false, Ordering::Relaxed);
     }
 
     /// Called before sending message to admin level.
@@ -167,10 +174,14 @@ pub fn start_quickfix_server(
     let settings = SessionSettings::try_from_path(config_file)?;
     let store_factory = FileMessageStoreFactory::try_new(&settings)?;
     let log_factory = LogFactory::try_new(&FantasyLogger::Stdout)?;
-
-    let fix_application = FixApplication::new(shared_data, handle.clone(), gw_config.clone());
+    let mut connected = Arc::new(AtomicBool::new(false));
+    let fix_application = FixApplication::new(
+        shared_data,
+        handle.clone(),
+        gw_config.clone(),
+        connected.clone(),
+    );
     let app = Application::try_new(&fix_application)?;
-
     let mut acceptor = SocketInitiator::try_new(&settings, &app, &store_factory, &log_factory)?;
     acceptor.start()?;
     while !acceptor.is_logged_on()? {
@@ -178,7 +189,7 @@ pub fn start_quickfix_server(
     }
     handle.block_on(async {
         loop {
-            if order_recv.len() == 0 {
+            if order_recv.len() == 0 || !connected.load(Ordering::Relaxed) {
                 sleep(Duration::from_millis(1000)).await;
                 continue;
             }
