@@ -5,3 +5,5 @@ begin_string: "FIX.4.2"
 sender_comp_id: "fantasy"
 target_comp_id: "SIMULATOR"
 interval: 1000
+plugin_cfg_file: ""
+broker_name: "Broker1"

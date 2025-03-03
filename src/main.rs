@@ -10,8 +10,10 @@ use std::{env, io::Write, net::SocketAddr, sync::Arc, thread};
 use tokio::runtime::Handle;
 use tokio::sync::{Mutex, mpsc};
 
+pub mod broker;
 pub mod cfg;
 pub mod fix_interface;
+pub mod gw_plugin;
 pub mod order_manager;
 pub mod server;
 pub mod shared_data;
@@ -37,26 +39,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let settings = Config::builder()
         .add_source(File::with_name(&cfg))
         .add_source(Environment::default().separator("_"))
-        .build();
-    if let Err(e) = settings {
-        error!("Error loading config: {}", e);
-        return Err("Error loading config".into());
-    }
-    let mut gw_config = None;
-    let settings = settings.unwrap();
-    match settings.try_deserialize::<GwConfig>() {
-        Ok(config) => gw_config = Some(config),
-        Err(e) => error!("Error deserializing config: {}", e),
-    }
-    info!("{:?}", gw_config.as_ref().unwrap());
+        .build()?;
+
+    let gw_config = settings.try_deserialize::<GwConfig>()?;
+    info!("{:?}", gw_config);
 
     // recv order from grpc forward to quickfix
     let (order_sender, mut order_receiver) = mpsc::unbounded_channel::<ForwardRequest>();
 
-    let config_file = gw_config.as_ref().unwrap().fix_cfg.clone();
+    let config_file = gw_config.fix_cfg.clone();
     let shared_data = Arc::new(Mutex::new(shared_data::SharedData::new()));
     let data_clone = shared_data.clone();
-    let gw_config_clone = gw_config.as_ref().unwrap().clone();
+    let gw_config_clone = gw_config.clone();
     let handle = Handle::current();
     thread::spawn(move || {
         if let Err(e) = start_quickfix_server(
@@ -70,8 +64,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    let addr: SocketAddr = gw_config.as_ref().unwrap().address.parse()?;
-    let example_service = MyExampleService::new(order_sender, shared_data, gw_config.unwrap());
+    let addr: SocketAddr = gw_config.address.parse()?;
+    let example_service = MyExampleService::new(order_sender, shared_data, gw_config);
 
     // https://medium.com/@drewjaja/how-to-add-grpc-reflection-with-rust-tonic-reflection-1f4e14e6750e
     let reflection_service = tonic_reflection::server::Builder::configure()

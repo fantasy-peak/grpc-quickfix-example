@@ -8,6 +8,10 @@ use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 
+use crate::broker::Broker;
+use crate::cfg::BrokerName;
+use crate::gw_plugin::Plugin;
+
 use fantasy_fix42::Messages;
 use fantasy_fix42::NewOrderSingle;
 use fantasy_fix42::field_types::HandlInst;
@@ -42,6 +46,7 @@ pub struct FixApplication {
     handle: Handle,
     gw_config: GwConfig,
     connected: Arc<AtomicBool>,
+    plugin: Arc<dyn Plugin>,
 }
 
 impl FixApplication {
@@ -50,12 +55,14 @@ impl FixApplication {
         handle: Handle,
         gw_config: GwConfig,
         connected: Arc<AtomicBool>,
+        plugin: Arc<dyn Plugin>,
     ) -> FixApplication {
         FixApplication {
             shared_data,
             handle,
             gw_config,
             connected,
+            plugin,
         }
     }
 
@@ -180,13 +187,27 @@ pub fn start_quickfix_server(
     let settings = SessionSettings::try_from_path(config_file)?;
     let store_factory = FileMessageStoreFactory::try_new(&settings)?;
     let log_factory = LogFactory::try_new(&FantasyLogger::Stdout)?;
-    let mut connected = Arc::new(AtomicBool::new(false));
+    let connected = Arc::new(AtomicBool::new(false));
+
+    let plugin: Arc<dyn Plugin>;
+    match &gw_config.broker_name {
+        BrokerName::Broker1 => {
+            info!("===============Broker1==================");
+            plugin = Arc::new(Broker::new(&gw_config.plugin_cfg_file));
+        }
+        BrokerName::Broker2 => {
+            plugin = Arc::new(Broker::new(&gw_config.plugin_cfg_file));
+        }
+    }
+
     let fix_application = FixApplication::new(
         shared_data,
         handle.clone(),
         gw_config.clone(),
         connected.clone(),
+        plugin.clone(),
     );
+
     let app = Application::try_new(&fix_application)?;
     let mut acceptor = SocketInitiator::try_new(&settings, &app, &store_factory, &log_factory)?;
     acceptor.start()?;
@@ -194,75 +215,33 @@ pub fn start_quickfix_server(
         thread::sleep(Duration::from_millis(250));
     }
 
-    handle.block_on(async {
+    let Ok(session_id) = SessionId::try_new(
+        &gw_config.begin_string,
+        &gw_config.sender_comp_id,
+        &gw_config.target_comp_id,
+        "",
+    ) else {
+        acceptor.stop()?;
+        return Err(QuickFixError::invalid_argument("create session_id error"));
+    };
+
+    handle.block_on(async move {
         loop {
             if order_recv.len() == 0 || !connected.load(Ordering::Relaxed) {
-                sleep(Duration::from_millis(1000)).await;
+                sleep(Duration::from_millis(200)).await;
                 continue;
             }
-            let req_opt = order_recv.recv().await;
-            if req_opt.is_none() {
+            let Some(request) = order_recv.recv().await else {
                 continue;
-            }
-            let request = req_opt.unwrap();
+            };
             match request {
                 ForwardRequest::RequestMessage(req) => {
                     println!("Received RequestMessage: {}", req.message);
-                    let now = chrono::Utc::now();
-                    let timestamp = now.format("%Y%m%d-%H:%M:%S%.3f").to_string();
-                    if let Ok(mut order) = NewOrderSingle::try_new(
-                        req.message,
-                        HandlInst::AutomatedExecutionNoIntervention,
-                        "USDJPY".to_string(),
-                        Side::Buy,
-                        timestamp,
-                        OrdType::Limit,
-                    ) {
-                        macro_rules! try_set {
-                            ($order:expr, $method:ident, $value:expr, $message:expr) => {
-                                if let Err(e) = $order.$method($value) {
-                                    eprintln!($message, e);
-                                    continue;
-                                }
-                            };
-                        }
-                        try_set!(
-                            order,
-                            set_order_qty,
-                            14.0,
-                            "Failed to set order quantity: {}"
-                        );
-                        try_set!(
-                            order,
-                            set_symbol,
-                            "USDJPY".to_string(),
-                            "Failed to set symbol: {}"
-                        );
-                        try_set!(order, set_price, 893.123, "Failed to set price: {}");
-                        try_set!(
-                            order,
-                            set_account,
-                            "fantasy".to_string(),
-                            "Failed to set account: {}"
-                        );
-
-                        if let Ok(session_id) = SessionId::try_new(
-                            &gw_config.begin_string,
-                            &gw_config.sender_comp_id,
-                            &gw_config.target_comp_id,
-                            "",
-                        ) {
-                            if let Err(e) = send_to_target(order.into(), &session_id) {
-                                error!("Failed to send order: {}", e);
-                                continue;
-                            }
-                        } else {
-                            error!("Failed to create session ID");
+                    if let Ok(order) = plugin.convert_to_new_order_single(&req) {
+                        if let Err(e) = send_to_target(order.into(), &session_id) {
+                            error!("Failed to send order: {}", e);
                             continue;
                         }
-                    } else {
-                        error!("Failed to create new order");
-                        continue;
                     }
                 }
                 ForwardRequest::ErrorMessage(err) => {
