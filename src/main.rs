@@ -51,7 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("{:?}", gw_config.as_ref().unwrap());
 
     // recv order from grpc forward to quickfix
-    let (order_sender, mut order_receiver) = mpsc::unbounded_channel::<RequestMessage>();
+    let (order_sender, mut order_receiver) = mpsc::unbounded_channel::<ForwardRequest>();
 
     let config_file = gw_config.as_ref().unwrap().fix_cfg.clone();
     let shared_data = Arc::new(Mutex::new(shared_data::SharedData::new()));

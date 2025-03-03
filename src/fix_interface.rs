@@ -31,6 +31,12 @@ pub enum QuickFixState {
     Logout,
 }
 
+#[derive(Debug)]
+pub enum ForwardRequest {
+    RequestMessage(RequestMessage),
+    ErrorMessage(String),
+}
+
 pub struct FixApplication {
     shared_data: Arc<Mutex<SharedData>>,
     handle: Handle,
@@ -159,7 +165,7 @@ impl LogCallback for FantasyLogger {
 
 pub fn start_quickfix_server(
     config_file: String,
-    order_recv: &mut mpsc::UnboundedReceiver<RequestMessage>,
+    order_recv: &mut mpsc::UnboundedReceiver<ForwardRequest>,
     shared_data: Arc<tokio::sync::Mutex<SharedData>>,
     handle: Handle,
     gw_config: GwConfig,
@@ -187,72 +193,86 @@ pub fn start_quickfix_server(
     while !acceptor.is_logged_on()? {
         thread::sleep(Duration::from_millis(250));
     }
+
     handle.block_on(async {
         loop {
             if order_recv.len() == 0 || !connected.load(Ordering::Relaxed) {
                 sleep(Duration::from_millis(1000)).await;
                 continue;
             }
-            if let Some(request) = order_recv.recv().await {
-                let now = chrono::Utc::now();
-                let timestamp = now.format("%Y%m%d-%H:%M:%S%.3f").to_string();
-                if let Ok(mut order) = NewOrderSingle::try_new(
-                    request.message,
-                    HandlInst::AutomatedExecutionNoIntervention,
-                    "USDJPY".to_string(),
-                    Side::Buy,
-                    timestamp,
-                    OrdType::Limit,
-                ) {
-                    macro_rules! try_set {
-                        ($order:expr, $method:ident, $value:expr, $message:expr) => {
-                            if let Err(e) = $order.$method($value) {
-                                eprintln!($message, e);
+            let req_opt = order_recv.recv().await;
+            if req_opt.is_none() {
+                continue;
+            }
+            let request = req_opt.unwrap();
+            match request {
+                ForwardRequest::RequestMessage(req) => {
+                    println!("Received RequestMessage: {}", req.message);
+                    let now = chrono::Utc::now();
+                    let timestamp = now.format("%Y%m%d-%H:%M:%S%.3f").to_string();
+                    if let Ok(mut order) = NewOrderSingle::try_new(
+                        req.message,
+                        HandlInst::AutomatedExecutionNoIntervention,
+                        "USDJPY".to_string(),
+                        Side::Buy,
+                        timestamp,
+                        OrdType::Limit,
+                    ) {
+                        macro_rules! try_set {
+                            ($order:expr, $method:ident, $value:expr, $message:expr) => {
+                                if let Err(e) = $order.$method($value) {
+                                    eprintln!($message, e);
+                                    continue;
+                                }
+                            };
+                        }
+                        try_set!(
+                            order,
+                            set_order_qty,
+                            14.0,
+                            "Failed to set order quantity: {}"
+                        );
+                        try_set!(
+                            order,
+                            set_symbol,
+                            "USDJPY".to_string(),
+                            "Failed to set symbol: {}"
+                        );
+                        try_set!(order, set_price, 893.123, "Failed to set price: {}");
+                        try_set!(
+                            order,
+                            set_account,
+                            "fantasy".to_string(),
+                            "Failed to set account: {}"
+                        );
+
+                        if let Ok(session_id) = SessionId::try_new(
+                            &gw_config.begin_string,
+                            &gw_config.sender_comp_id,
+                            &gw_config.target_comp_id,
+                            "",
+                        ) {
+                            if let Err(e) = send_to_target(order.into(), &session_id) {
+                                error!("Failed to send order: {}", e);
                                 continue;
                             }
-                        };
-                    }
-                    try_set!(
-                        order,
-                        set_order_qty,
-                        14.0,
-                        "Failed to set order quantity: {}"
-                    );
-                    try_set!(
-                        order,
-                        set_symbol,
-                        "USDJPY".to_string(),
-                        "Failed to set symbol: {}"
-                    );
-                    try_set!(order, set_price, 893.123, "Failed to set price: {}");
-                    try_set!(
-                        order,
-                        set_account,
-                        "fantasy".to_string(),
-                        "Failed to set account: {}"
-                    );
-
-                    if let Ok(session_id) = SessionId::try_new(
-                        &gw_config.begin_string,
-                        &gw_config.sender_comp_id,
-                        &gw_config.target_comp_id,
-                        "",
-                    ) {
-                        if let Err(e) = send_to_target(order.into(), &session_id) {
-                            error!("Failed to send order: {}", e);
+                        } else {
+                            error!("Failed to create session ID");
                             continue;
                         }
                     } else {
-                        error!("Failed to create session ID");
+                        error!("Failed to create new order");
                         continue;
                     }
-                } else {
-                    error!("Failed to create new order");
-                    continue;
+                }
+                ForwardRequest::ErrorMessage(err) => {
+                    // 匹配到 ErrorMessage 变体，处理错误信息
+                    println!("Received ErrorMessage: {}", err);
                 }
             }
         }
     });
+
     info!("call acceptor.stop()");
     acceptor.stop()?;
     Ok(())

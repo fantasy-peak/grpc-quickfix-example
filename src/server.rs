@@ -4,6 +4,7 @@ use tokio::sync::{Mutex, mpsc};
 use tokio::time::Duration;
 use tokio::time::sleep;
 
+use crate::ForwardRequest;
 use crate::cfg::GwConfig;
 use crate::order_manager::OrderManager;
 use crate::shared_data::SharedData;
@@ -25,7 +26,7 @@ use tokio_stream::wrappers::ReceiverStream; // 引入 tokio_stream
 use tonic::{Request, Response, Status, transport::Server};
 
 pub struct MyExampleService {
-    order_sender: mpsc::UnboundedSender<RequestMessage>,
+    order_sender: mpsc::UnboundedSender<ForwardRequest>,
     shared_data: Arc<Mutex<SharedData>>,
     gw_config: GwConfig,
     order_manager: Arc<Mutex<OrderManager>>,
@@ -33,7 +34,7 @@ pub struct MyExampleService {
 
 impl MyExampleService {
     pub fn new(
-        sender: mpsc::UnboundedSender<RequestMessage>,
+        sender: mpsc::UnboundedSender<ForwardRequest>,
         sd: Arc<tokio::sync::Mutex<SharedData>>,
         gw_cfg: GwConfig,
     ) -> MyExampleService {
@@ -64,7 +65,10 @@ impl ExampleService for MyExampleService {
             }
         */
         // let message = request.into_inner().message;
-        if let Err(_) = self.order_sender.send(request) {
+        if let Err(_) = self
+            .order_sender
+            .send(ForwardRequest::RequestMessage(request))
+        {
             info!("send order error");
         }
         Ok(Response::new(ResponseMessage {
