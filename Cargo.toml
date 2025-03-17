@@ -8,7 +8,7 @@ edition = "2024"
 # coinbase-fix50-market-data = { git = "https://github.com/fantasy-peak/quickfix-rs.git" }
 # coinbase-fix-utils = { git = "https://github.com/fantasy-peak/quickfix-rs.git" }
 quickfix = { git = "https://github.com/fantasy-peak/quickfix-rs.git" }
-tokio = { version = "1.43.0", features = ["full"] }
+tokio = { version = "1.43.0", features = ["full", "tracing"] }
 tonic = "0.12.3"
 prost = "0.13.5"
 futures-util = "0.3.31"
@@ -24,6 +24,7 @@ log = "0.4.26"
 env_logger = "0.11.6"
 
 fantasy-fix42 = { path = "./fantasy-fix42" }
+console-subscriber = "0.4.1"
 
 [build-dependencies]
 tonic-build = "0.12.3"

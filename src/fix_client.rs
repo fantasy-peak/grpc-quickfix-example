@@ -8,9 +8,9 @@ use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 
-use crate::broker::Broker;
 use crate::cfg::BrokerName;
-use crate::gw_plugin::Plugin;
+use crate::fix_convert::broker::Broker;
+use crate::fix_convert::gw_plugin::Plugin;
 
 use fantasy_fix42::Messages;
 use fantasy_fix42::NewOrderSingle;

@@ -10,20 +10,20 @@ use std::{env, io::Write, net::SocketAddr, sync::Arc, thread};
 use tokio::runtime::Handle;
 use tokio::sync::{Mutex, mpsc};
 
-pub mod broker;
 pub mod cfg;
-pub mod fix_interface;
-pub mod gw_plugin;
+pub mod fix_client;
+pub mod fix_convert;
 pub mod order_manager;
 pub mod server;
 pub mod shared_data;
 
 pub use cfg::GwConfig;
-pub use fix_interface::*;
+pub use fix_client::*;
 pub use server::MyExampleService;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    console_subscriber::init();
     env_logger::builder()
         .format_timestamp(None)
         .format(|buf, record| writeln!(buf, "{}", record.args()))

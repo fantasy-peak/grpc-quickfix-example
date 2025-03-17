@@ -3,7 +3,7 @@ use fantasy_fix42::field_types::{HandlInst, OrdType, Side};
 use quickfix::*;
 use serde::de::value::Error;
 
-use crate::gw_plugin::Plugin;
+use crate::fix_convert::gw_plugin::Plugin;
 use crate::server::fantasy::RequestMessage;
 
 struct BrokerCfg {
